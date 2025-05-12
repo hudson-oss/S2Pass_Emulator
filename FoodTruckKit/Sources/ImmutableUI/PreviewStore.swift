@@ -22,15 +22,18 @@ import SwiftUI
 where Content: View {
   @State private var store: ImmutableData.Store<FoodTruckState, FoodTruckAction>
   @State private var modelListener: ModelListener?
+  @State private var storeListener: StoreListener<Never>?
   private let content: Content
   
   private init(
     store: ImmutableData.Store<FoodTruckState, FoodTruckAction>,
     modelListener: ModelListener? = nil,
+    storeListener: StoreListener<Never>? = nil,
     @ViewBuilder content: () -> Content
   ) {
     self.store = store
     self.modelListener = modelListener
+    self.storeListener = storeListener
     self.content = content()
   }
 }
@@ -57,9 +60,15 @@ extension PreviewStore {
       to: model,
       with: store
     )
+    let storeListener = StoreListener()
+    storeListener.listen(
+      to: store,
+      with: model
+    )
     self.init(
       store: store,
       modelListener: modelListener,
+      storeListener: storeListener,
       content: content
     )
   }
