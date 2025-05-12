@@ -7,6 +7,8 @@ The single entry point for the Food Truck app on iOS and macOS.
 
 import SwiftUI
 import FoodTruckKit
+import ImmutableData
+import ImmutableUI
 
 /// The app's entry point.
 ///
@@ -19,6 +21,12 @@ struct FoodTruckApp: App {
     /// The in-app purchase store's state.
     @StateObject private var accountStore = AccountStore()
     
+    @State private var store = ImmutableData.Store(
+        initialState: FoodTruckState(),
+        reducer: FoodTruckReducer.reduce
+    )
+    @State private var modelListener = ModelListener()
+    
     /// The app's body function.
     ///
     /// This app uses a [`WindowGroup`](https://developer.apple.com/documentation/swiftui/windowgroup) scene, which contains the root view of the app, ``ContentView``.
@@ -27,7 +35,15 @@ struct FoodTruckApp: App {
     /// scene is used on macOS to insert a menu into the right side of the menu bar.
     var body: some Scene {
         WindowGroup {
-            ContentView(model: model, accountStore: accountStore)
+            ImmutableUI.Provider(self.store) {
+                ContentView(model: model, accountStore: accountStore)
+            }
+            .onAppear {
+                self.modelListener.listen(
+                    to: self.model,
+                    with: self.store
+                )
+            }
         }
         #if os(macOS)
         .defaultSize(width: 1000, height: 650)
