@@ -19,6 +19,9 @@ public class FoodTruckModel: ObservableObject {
     var dailyOrderSummaries: [City.ID: [OrderSummary]] = [:]
     var monthlyOrderSummaries: [City.ID: [OrderSummary]] = [:]
 
+    private var generator = OrderGenerator.SeededRandomGenerator(seed: 5)
+    private let orderGenerator = OrderGenerator(knownDonuts: Donut.all)
+    
     public init() {
         newDonut = Donut(
             id: Donut.all.count,
@@ -37,13 +40,10 @@ public class FoodTruckModel: ObservableObject {
             (key: city.id, orderGenerator.historicalMonthlyOrders(since: .now, cityID: city.id))
         })
         Task(priority: .background) {
-            var generator = OrderGenerator.SeededRandomGenerator(seed: 5)
             for _ in 0..<20 {
                 try? await Task.sleep(nanoseconds: .secondsToNanoseconds(.random(in: 3 ... 8, using: &generator)))
                 Task { @MainActor in
-                    withAnimation(.spring(response: 0.4, dampingFraction: 1)) {
-                        self.orders.append(orderGenerator.generateOrder(number: orders.count + 1, date: .now, generator: &generator))
-                    }
+                    addOrder()
                 }
             }
         }
@@ -189,6 +189,26 @@ public class FoodTruckModel: ObservableObject {
     
     public var incompleteOrders: [Order] {
         orders.filter { $0.status != .completed }
+    }
+}
+
+extension FoodTruckModel {
+    func markOrderAsNextStep(id: Order.ID) {
+        guard let index = orders.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        orders[index].markAsNextStep { _ in }
+    }
+}
+
+extension FoodTruckModel {
+    func addOrder() {
+        let order = orderGenerator.generateOrder(
+            number: orders.count + 1,
+            date: .now,
+            generator: &generator
+        )
+        self.orders.append(order)
     }
 }
 
