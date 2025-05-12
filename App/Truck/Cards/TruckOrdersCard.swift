@@ -9,8 +9,10 @@ import SwiftUI
 import FoodTruckKit
 
 struct TruckOrdersCard: View {
-    @ObservedObject var model: FoodTruckModel
-    var orders: [Order] { model.orders }
+    @SelectOrdersValues(
+        min: 5,
+        using: KeyPathComparator(\Order.creationDate, order: .reverse)
+    ) private var orders: [Order]
     var navigation: TruckCardHeaderNavigation = .navigationLink
     
     @State private var pulseOrderText = false
@@ -22,7 +24,7 @@ struct TruckOrdersCard: View {
             }
 
             (HeroSquareTilingLayout()) {
-                ForEach(orders.reversed().prefix(5)) { order in
+                ForEach(orders) { order in
                     let iconShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
                     DonutStackView(donuts: order.donuts)
                         .padding(6)
@@ -46,7 +48,7 @@ struct TruckOrdersCard: View {
             .aspectRatio(2, contentMode: .fit)
             .frame(maxWidth: .infinity, maxHeight: 250)
             
-            if let order = orders.last {
+            if let order = orders.first {
                 HStack {
                     Text(order.id)
                     Image.donutSymbol
@@ -61,7 +63,7 @@ struct TruckOrdersCard: View {
         .padding(10)
         .clipShape(ContainerRelativeShape())
         .background()
-        .onChange(of: orders.last) { newValue in
+        .onChange(of: orders.first?.id) { newValue in
             Task(priority: .background) {
                 try await Task.sleep(nanoseconds: .secondsToNanoseconds(0.1))
                 Task { @MainActor in
@@ -77,6 +79,23 @@ struct TruckOrdersCard: View {
                 }
             }
         }
+        .animation(
+            .spring(
+                response: 0.4,
+                dampingFraction: 1
+            ),
+            value: orders.first?.id
+        )
+    }
+}
+
+extension TruckOrdersCard {
+    @available(*, deprecated)
+    init(
+        model: FoodTruckModel,
+        navigation: TruckCardHeaderNavigation
+    ) {
+        self.init(navigation: navigation)
     }
 }
 
@@ -142,13 +161,20 @@ struct TruckOrdersCard_Previews: PreviewProvider {
     struct Preview: View {
         @StateObject private var model = FoodTruckModel()
         var body: some View {
-            TruckOrdersCard(model: model)
+            PreviewStore(model: model) {
+                NavigationStack {
+                    TruckOrdersCard()
+                }
+            }
         }
     }
     
     static var previews: some View {
-        NavigationStack {
-            Preview()
+        Preview()
+        PreviewStore {
+            NavigationStack {
+                TruckOrdersCard()
+            }
         }
     }
 }
