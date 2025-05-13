@@ -9,18 +9,11 @@ import SwiftUI
 import FoodTruckKit
 
 struct OrdersTable: View {
-    @ObservedObject var model: FoodTruckModel
-    @State private var sortOrder = [KeyPathComparator(\Order.status, order: .reverse)]
+    @Binding var sortOrder: [KeyPathComparator<Order>]
     @Binding var selection: Set<Order.ID>
-    @Binding var completedOrder: Order?
-    @Binding var searchText: String
     
-    var orders: [Order] {
-        model.orders.filter { order in
-            order.matches(searchText: searchText) || order.donuts.contains(where: { $0.matches(searchText: searchText) })
-        }
-        .sorted(using: sortOrder)
-    }
+    let orders: [Order]
+    let onTapCompleteOrderButton: (Order.ID) -> ()
     
     var body: some View {
         Table(selection: $selection, sortOrder: $sortOrder) {
@@ -62,8 +55,7 @@ struct OrdersTable: View {
                     if !order.isComplete {
                         Section {
                             Button {
-                                model.markOrderAsCompleted(id: order.id)
-                                completedOrder = order
+                                onTapCompleteOrderButton(order.id)
                             } label: {
                                 Label("Complete Order", systemImage: "checkmark")
                             }
@@ -90,25 +82,42 @@ struct OrdersTable: View {
     }
 }
 
+extension OrdersTable {
+    @available(*, deprecated)
+    init(
+        model: FoodTruckModel,
+        selection: Binding<Set<Order.ID>>,
+        completedOrder: Binding<Order?>,
+        searchText: Binding<String>
+    ) {
+        fatalError()
+    }
+}
+
 struct OrdersTable_Previews: PreviewProvider {
-    
-    @State private var sortOrder = [KeyPathComparator(\Order.status, order: .reverse)]
-    
     struct Preview: View {
-        @StateObject private var model = FoodTruckModel.preview
+        @State private var sortOrder = [KeyPathComparator(\Order.status, order: .reverse)]
+        @State private var selection: Set<Order.ID> = []
+        
+        private var orders: [Order] {
+            Order.previewArray.sorted(using: self.sortOrder)
+        }
         
         var body: some View {
             OrdersTable(
-                model: FoodTruckModel.preview,
-                selection: .constant([]),
-                completedOrder: .constant(nil),
-                searchText: .constant("")
-            )
+                sortOrder: self.$sortOrder,
+                selection: self.$selection,
+                orders: self.orders
+            ) { orderID in
+                print(orderID)
+            }
         }
     }
     
     static var previews: some View {
-        Preview()
+        PreviewStore {
+            Preview()
+        }
     }
 }
 
