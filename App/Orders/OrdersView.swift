@@ -8,13 +8,57 @@ The orders view.
 import SwiftUI
 import FoodTruckKit
 
-struct OrdersView: View {
-    @ObservedObject var model: FoodTruckModel
+fileprivate struct Item<T>: Identifiable
+where T: Hashable {
+    var id: T
+}
+
+@MainActor @propertyWrapper fileprivate struct SelectOrders: @preconcurrency DynamicProperty {
+    @State var searchText: String
+    @State var sortOrder: [KeyPathComparator<Order>]
     
-    @State private var sortOrder = [KeyPathComparator(\Order.status, order: .reverse)]
-    @State private var searchText = ""
-    @State private var selection: Set<Order.ID> = []
-    @State private var completedOrder: Order?
+    @SelectOrdersValues var wrappedValue: [Order]
+    
+    init(
+        searchText: String = "",
+        using sortOrder: [KeyPathComparator<Order>] = [
+            KeyPathComparator(\Order.status, order: .reverse),
+            KeyPathComparator(\Order.creationDate, order: .reverse),
+        ]
+    ) {
+        self.searchText = searchText
+        self.sortOrder = sortOrder
+        self._wrappedValue = SelectOrdersValues(
+            searchText: searchText,
+            using: sortOrder
+        )
+    }
+    
+    mutating func update() {
+        self._wrappedValue.update(
+            searchText: self.searchText,
+            using: self.sortOrder
+        )
+    }
+}
+
+@MainActor @propertyWrapper fileprivate struct SelectStatuses: @preconcurrency DynamicProperty {
+    @State var orderIDs: Set<Order.ID>
+    
+    @SelectOrdersStatuses var wrappedValue: [Order.ID: OrderStatus]
+    
+    init(orderIDs: Set<Order.ID> = []) {
+        self.orderIDs = orderIDs
+        self._wrappedValue = SelectOrdersStatuses(orderIDs: orderIDs)
+    }
+    
+    mutating func update() {
+        self._wrappedValue.update(orderIDs: self.orderIDs)
+    }
+}
+
+struct OrdersView: View {
+    @State private var completedOrder: Item<Order.ID>?
     
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -29,12 +73,10 @@ struct OrdersView: View {
         #endif
     }
     
-    var orders: [Order] {
-        model.orders.filter { order in
-            order.matches(searchText: searchText) || order.donuts.contains(where: { $0.matches(searchText: searchText) })
-        }
-        .sorted(using: sortOrder)
-    }
+    @SelectOrders private var orders: [Order]
+    @SelectStatuses private var statuses: [Order.ID: OrderStatus]
+    
+    @Dispatch private var dispatch
     
     var orderSections: [OrderStatus: [Order]] {
         var result: [OrderStatus: [Order]] = [:]
@@ -49,23 +91,37 @@ struct OrdersView: View {
             if displayAsList {
                 list
             } else {
-                OrdersTable(model: model, selection: $selection, completedOrder: $completedOrder, searchText: $searchText)
+                OrdersTable(
+                    sortOrder: _orders.$sortOrder,
+                    selection: _statuses.$orderIDs,
+                    orders: orders
+                ) { orderID in
+                    onTapCompleteOrderButton(orderID: orderID)
+                    completedOrder = Item(id: orderID)
+                }
                     .tableStyle(.inset)
             }
         }
         .navigationTitle("Orders")
         .navigationDestination(for: Order.ID.self) { id in
-            OrderDetailView(order: model.orderBinding(for: id))
+            OrderDetailView(orderID: id)
         }
         .toolbar {
             if !displayAsList {
                 toolbarButtons
             }
         }
-        .searchable(text: $searchText)
+        .searchable(text: _orders.$searchText)
         .sheet(item: $completedOrder) { order in
-            OrderCompleteView(order: order)
+            OrderCompleteView(orderID: order.id)
         }
+        .animation(
+            .spring(
+                response: 0.4,
+                dampingFraction: 1
+            ),
+            value: orders.count
+        )
     }
     
     var list: some View {
@@ -108,22 +164,28 @@ struct OrdersView: View {
     
     @ViewBuilder
     var toolbarButtons: some View {
-        NavigationLink(value: selection.first) {
+        Button {
+            onTapAddOrderButton()
+        } label: {
+            Label("Create Order", systemImage: "plus")
+        }
+        
+        NavigationLink(value: statuses.first?.key) {
             Label("View Details", systemImage: "list.bullet.below.rectangle")
         }
-        .disabled(selection.isEmpty)
+        .disabled(statuses.count != 1)
         
         Button {
-            for orderID in selection {
-                model.markOrderAsCompleted(id: orderID)
+            for orderID in statuses.keys {
+                onTapCompleteOrderButton(orderID: orderID)
             }
-            if let orderID = selection.first {
-                completedOrder = model.orderBinding(for: orderID).wrappedValue
+            if let orderID = statuses.first(where: { $0.value != .completed })?.key {
+                completedOrder = Item(id: orderID)
             }
         } label: {
-            Label("View Details", systemImage: "checkmark.circle")
+            Label("Complete Order", systemImage: "checkmark.circle")
         }
-        .disabled(selection.isEmpty)
+        .disabled(statuses.allSatisfy { $0.value == .completed })
         
         #if os(iOS)
         if editMode?.wrappedValue.isEditing == false {
@@ -137,18 +199,52 @@ struct OrdersView: View {
     }
 }
 
+extension OrdersView {
+    @available(*, deprecated)
+    init(model: FoodTruckModel) {
+        self.init()
+    }
+}
+
+extension OrdersView {
+    private func onTapCompleteOrderButton(orderID: Order.ID) {
+        do {
+            try self.dispatch(.ui(.ordersView(.onTapCompleteOrderButton(orderID: orderID))))
+        } catch {
+            print(error)
+        }
+    }
+}
+
+extension OrdersView {
+    private func onTapAddOrderButton() {
+        do {
+            try self.dispatch(.ui(.ordersView(.onTapAddOrderButton)))
+        } catch {
+            print(error)
+        }
+    }
+}
+
 struct OrdersView_Previews: PreviewProvider {
     struct Preview: View {
         @StateObject private var model = FoodTruckModel.preview
         
         var body: some View {
-            OrdersView(model: model)
+            PreviewStore(model: model) {
+                NavigationStack {
+                    OrdersView()
+                }
+            }
         }
     }
     
     static var previews: some View {
+        Preview()
         NavigationStack {
-            Preview()
+            PreviewStore {
+                OrdersView()
+            }
         }
     }
 }
