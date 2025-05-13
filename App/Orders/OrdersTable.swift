@@ -82,18 +82,6 @@ struct OrdersTable: View {
     }
 }
 
-extension OrdersTable {
-    @available(*, deprecated)
-    init(
-        model: FoodTruckModel,
-        selection: Binding<Set<Order.ID>>,
-        completedOrder: Binding<Order?>,
-        searchText: Binding<String>
-    ) {
-        fatalError()
-    }
-}
-
 struct OrdersTable_Previews: PreviewProvider {
     struct Preview: View {
         @State private var sortOrder = [KeyPathComparator(\Order.status, order: .reverse)]
