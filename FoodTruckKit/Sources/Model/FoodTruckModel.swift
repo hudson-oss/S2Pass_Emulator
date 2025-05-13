@@ -10,15 +10,15 @@ import Combine
 
 @MainActor
 public class FoodTruckModel: ObservableObject {
-    @Published public var truck = Truck()
+    @Published public private(set) var truck = Truck()
     
-    @Published public var orders: [Order] = []
-    @Published public var donuts = Donut.all
+    @Published public private(set) var orders: [Order] = []
+    @Published public private(set) var donuts = Donut.all
     @Published public var newDonut: Donut
         
-    var dailyOrderSummaries: [City.ID: [OrderSummary]] = [:]
-    var monthlyOrderSummaries: [City.ID: [OrderSummary]] = [:]
-
+    private var dailyOrderSummaries: [City.ID: [OrderSummary]] = [:]
+    private var monthlyOrderSummaries: [City.ID: [OrderSummary]] = [:]
+    
     private var generator = OrderGenerator.SeededRandomGenerator(seed: 5)
     private let orderGenerator = OrderGenerator(knownDonuts: Donut.all)
     
@@ -63,10 +63,6 @@ public class FoodTruckModel: ObservableObject {
         return result
     }
     
-    public func donuts<S: Sequence>(fromIDs ids: S) -> [Donut] where S.Element == Donut.ID {
-        ids.map { donut(id: $0) }
-    }
-    
     public func donutSales(timeframe: Timeframe) -> [DonutSales] {
         combinedOrderSummary(timeframe: timeframe).sales.map { (id, count) in
             DonutSales(donut: donut(id: id), sales: count)
@@ -87,37 +83,7 @@ public class FoodTruckModel: ObservableObject {
         }
     }
     
-    public func orderBinding(for id: Order.ID) -> Binding<Order> {
-        Binding<Order> {
-            guard let index = self.orders.firstIndex(where: { $0.id == id }) else {
-                fatalError()
-            }
-            return self.orders[index]
-        } set: { newValue in
-            guard let index = self.orders.firstIndex(where: { $0.id == id }) else {
-                fatalError()
-            }
-            return self.orders[index] = newValue
-        }
-    }
-    
-    public func orderSummaries(for cityID: City.ID, timeframe: Timeframe) -> [OrderSummary] {
-        switch timeframe {
-        case .today:
-            return orders.map { OrderSummary(sales: $0.sales) }
-            
-        case .week:
-            return Array(dailyOrderSummaries(cityID: cityID).prefix(7))
-            
-        case .month:
-            return Array(dailyOrderSummaries(cityID: cityID).prefix(30))
-            
-        case .year:
-            return monthlyOrderSummaries(cityID: cityID)
-        }
-    }
-    
-    public func combinedOrderSummary(timeframe: Timeframe) -> OrderSummary {
+    private func combinedOrderSummary(timeframe: Timeframe) -> OrderSummary {
         switch timeframe {
         case .today:
             return orders.reduce(into: .empty) { partialResult, order in
@@ -147,7 +113,7 @@ public class FoodTruckModel: ObservableObject {
         }
     }
     
-    func donutsSortedByPopularity(timeframe: Timeframe) -> [Donut] {
+    private func donutsSortedByPopularity(timeframe: Timeframe) -> [Donut] {
         let result = combinedOrderSummary(timeframe: timeframe).sales
             .sorted {
                 if $0.value > $1.value {
@@ -164,7 +130,7 @@ public class FoodTruckModel: ObservableObject {
         return result
     }
     
-    public func donut(id: Donut.ID) -> Donut {
+    private func donut(id: Donut.ID) -> Donut {
         donuts[id]
     }
     
@@ -176,19 +142,11 @@ public class FoodTruckModel: ObservableObject {
         }
     }
     
-    public func updateDonut(id: Donut.ID, to newValue: Donut) {
-        donutBinding(id: id).wrappedValue = newValue
-    }
-    
-    public func markOrderAsCompleted(id: Order.ID) {
+    func markOrderAsCompleted(id: Order.ID) {
         guard let index = orders.firstIndex(where: { $0.id == id }) else {
             return
         }
         orders[index].status = .completed
-    }
-    
-    public var incompleteOrders: [Order] {
-        orders.filter { $0.status != .completed }
     }
 }
 
