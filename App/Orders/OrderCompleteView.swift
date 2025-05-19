@@ -16,7 +16,11 @@ struct OrderCompleteView: View {
     @State private var boxClosed = false
     @State private var boxBounce = false
     
-    var order: Order
+    @SelectOrder private var order: Order?
+    
+    init(orderID: Order.ID) {
+        self._order = SelectOrder(orderID: orderID)
+    }
     
     @Environment(\.dismiss) private var dismiss
     
@@ -24,7 +28,7 @@ struct OrderCompleteView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
     }
     
-    var body: some View {
+    private func content(_ order: Order) -> some View {
         NavigationStack {
             VStack {
                 DonutBoxView(isOpen: boxClosed) {
@@ -70,6 +74,14 @@ struct OrderCompleteView: View {
                     }
                 }
             }
+        }
+    }
+    
+    var body: some View {
+        if let order = self.order {
+            self.content(order)
+        } else {
+            Text("missing order").padding()
         }
     }
     
@@ -122,8 +134,20 @@ struct OrderCompleteView: View {
     }
 }
 
+extension OrderCompleteView {
+    @available(*, deprecated)
+    init(order: Order) {
+        self.init(orderID: order.id)
+    }
+}
+
 struct OrderCompleteView_Previews: PreviewProvider {
     static var previews: some View {
-        OrderCompleteView(order: .preview)
+        PreviewStore {
+            OrderCompleteView(orderID: Order.preview.id)
+        }
+        PreviewStore {
+            OrderCompleteView(orderID: "")
+        }
     }
 }
