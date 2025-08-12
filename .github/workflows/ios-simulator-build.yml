@@ -1,0 +1,55 @@
+name: iOS Simulator Build (Appetize)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout (full, with LFS & submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+          submodules: recursive
+
+      - name: Show repo tree (debug)
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 2 -name "*.xcodeproj" -print -exec ls -la {} \; || true
+
+      - name: Build Food Truck for iOS Simulator (signing OFF)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "Food Truck.xcodeproj" \
+            -scheme "Food Truck" \
+            -sdk iphonesimulator \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$GITHUB_WORKSPACE/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Zip .app for Appetize
+        run: |
+          set -euo pipefail
+          APP_DIR="$GITHUB_WORKSPACE/build/Build/Products/Release-iphonesimulator"
+          echo "Looking in: $APP_DIR"
+          ls -la "$APP_DIR" || true
+          APP_PATH=$(echo "$APP_DIR"/*.app | head -n1)
+          if [ ! -d "$APP_PATH" ]; then
+            echo "❌ No .app found. Check the build step for errors." >&2
+            exit 1
+          fi
+          cd "$APP_DIR"
+          zip -r AppetizeBuild.app.zip "$(basename "$APP_PATH")"
+          mv AppetizeBuild.app.zip "$GITHUB_WORKSPACE/"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: appetize-simulator-app
+          path: AppetizeBuild.app.zip
