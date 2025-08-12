@@ -20,33 +20,61 @@ jobs:
           ls -la
           find . -maxdepth 2 -name "*.xcodeproj" -print -exec ls -la {} \; || true
 
-      - name: Build Food Truck for iOS Simulator (signing OFF)
+      - name: List schemes (Food Truck.xcodeproj)
+        id: listschemes
+        run: |
+          if [ ! -d "Food Truck.xcodeproj" ]; then
+            echo "❌ Food Truck.xcodeproj not found at repo root." >&2
+            exit 1
+          fi
+          xcodebuild -list -project "Food Truck.xcodeproj"
+
+      - name: Build (iOS Simulator, signing OFF)
+        env:
+          CONFIG: Release
+          SDK: iphonesimulator
+          DEST: 'platform=iOS Simulator,name=iPhone 15 Pro'
+          DERIVED: ${{ github.workspace }}/build
         run: |
           set -euo pipefail
-          xcodebuild \
-            -project "Food Truck.xcodeproj" \
-            -scheme "Food Truck" \
-            -sdk iphonesimulator \
-            -configuration Release \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$GITHUB_WORKSPACE/build" \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+          # Try the most common scheme names in order
+          for SCHEME in "Food Truck" "Food Truck iOS" "FoodTruck"; do
+            echo "\n=== Trying scheme: $SCHEME ===\n"
+            if xcodebuild \
+              -project "Food Truck.xcodeproj" \
+              -scheme "$SCHEME" \
+              -sdk "$SDK" \
+              -configuration "$CONFIG" \
+              -destination "$DEST" \
+              -derivedDataPath "$DERIVED" \
+              CODE_SIGNING_ALLOWED=NO \
+              build; then
+              echo "\n✅ Built with scheme: $SCHEME" && echo "$SCHEME" > "$GITHUB_WORKSPACE/.chosen_scheme"
+              break
+            else
+              echo "\n⚠️ Build failed for scheme: $SCHEME — will try next"
+            fi
+          done
+          if [ ! -f "$GITHUB_WORKSPACE/.chosen_scheme" ]; then
+            echo "❌ All candidate schemes failed. See logs above for the first real error." >&2
+            exit 1
+          fi
 
       - name: Zip .app for Appetize
         run: |
           set -euo pipefail
-          APP_DIR="$GITHUB_WORKSPACE/build/Build/Products/Release-iphonesimulator"
+          APP_DIR="$GITHUB_WORKSPACE/build/Build/Products/${CONFIG}-iphonesimulator"
           echo "Looking in: $APP_DIR"
           ls -la "$APP_DIR" || true
           APP_PATH=$(echo "$APP_DIR"/*.app | head -n1)
           if [ ! -d "$APP_PATH" ]; then
-            echo "❌ No .app found. Check the build step for errors." >&2
+            echo "❌ No .app found. Check previous step for build errors and scheme name." >&2
             exit 1
           fi
           cd "$APP_DIR"
-          zip -r AppetizeBuild.app.zip "$(basename "$APP_PATH")"
-          mv AppetizeBuild.app.zip "$GITHUB_WORKSPACE/"
+          ZIP_NAME=AppetizeBuild.app.zip
+          zip -r "$ZIP_NAME" "$(basename "$APP_PATH")"
+          mv "$ZIP_NAME" "$GITHUB_WORKSPACE/"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
