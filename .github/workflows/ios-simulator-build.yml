@@ -1,7 +1,15 @@
+# File path: .github/workflows/ios-simulator-build.yml
+# Purpose: Build an iOS *Simulator* .app, zip it for Appetize, and handle scheme issues.
+
 name: iOS Simulator Build (Appetize)
 
 on:
   workflow_dispatch:
+    inputs:
+      scheme:
+        description: "(Optional) Xcode scheme name, EXACT as shown in xcodebuild -list"
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -18,16 +26,44 @@ jobs:
         run: |
           pwd
           ls -la
-          find . -maxdepth 2 -name "*.xcodeproj" -print -exec ls -la {} \; || true
+          find . -maxdepth 3 -name "*.xcworkspace" -print -exec ls -la {} \; || true
+          find . -maxdepth 3 -name "*.xcodeproj" -print -exec ls -la {} \; || true
 
-      - name: List schemes (Food Truck.xcodeproj)
-        id: listschemes
+      - name: Detect container (workspace vs project) & list schemes
+        id: detect
+        shell: bash
         run: |
-          if [ ! -d "Food Truck.xcodeproj" ]; then
-            echo "❌ Food Truck.xcodeproj not found at repo root." >&2
+          set -euo pipefail
+          # Prefer workspace if present
+          if WORK=$(find . -maxdepth 3 -type d -name "*.xcworkspace" | head -n1); then
+            KIND=workspace
+            FILE="$WORK"
+            echo "Found workspace: $FILE"
+            LIST=$(xcodebuild -list -workspace "$FILE" || true)
+          elif PROJ=$(find . -maxdepth 3 -type d -name "*.xcodeproj" | head -n1); then
+            KIND=project
+            FILE="$PROJ"
+            echo "Found project: $FILE"
+            LIST=$(xcodebuild -list -project "$FILE" || true)
+          else
+            echo "❌ No .xcodeproj or .xcworkspace found" >&2
             exit 1
           fi
-          xcodebuild -list -project "Food Truck.xcodeproj"
+          echo "\n--- xcodebuild -list output ---\n$LIST\n-------------------------------\n"
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          echo "kind=$KIND" >> $GITHUB_OUTPUT
+          # Extract first listed scheme (trim)
+          FIRST=$(echo "$LIST" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | sed 's/^\s*//;s/\s*$//' | head -n1)
+          echo "first_scheme=$FIRST" >> $GITHUB_OUTPUT
+
+      - name: Resolve Swift Package dependencies (best‑effort)
+        run: |
+          set -e
+          if [ "${{ steps.detect.outputs.kind }}" = "workspace" ]; then
+            xcodebuild -resolvePackageDependencies -workspace "${{ steps.detect.outputs.file }}" || true
+          else
+            xcodebuild -resolvePackageDependencies -project "${{ steps.detect.outputs.file }}" || true
+          fi
 
       - name: Build (iOS Simulator, signing OFF)
         env:
@@ -37,27 +73,36 @@ jobs:
           DERIVED: ${{ github.workspace }}/build
         run: |
           set -euo pipefail
-          # Try the most common scheme names in order
-          for SCHEME in "Food Truck" "Food Truck iOS" "FoodTruck"; do
-            echo "\n=== Trying scheme: $SCHEME ===\n"
-            if xcodebuild \
-              -project "Food Truck.xcodeproj" \
-              -scheme "$SCHEME" \
-              -sdk "$SDK" \
-              -configuration "$CONFIG" \
-              -destination "$DEST" \
-              -derivedDataPath "$DERIVED" \
-              CODE_SIGNING_ALLOWED=NO \
-              build; then
-              echo "\n✅ Built with scheme: $SCHEME" && echo "$SCHEME" > "$GITHUB_WORKSPACE/.chosen_scheme"
-              break
-            else
-              echo "\n⚠️ Build failed for scheme: $SCHEME — will try next"
-            fi
-          done
-          if [ ! -f "$GITHUB_WORKSPACE/.chosen_scheme" ]; then
-            echo "❌ All candidate schemes failed. See logs above for the first real error." >&2
+          SCHEME_INPUT='${{ github.event.inputs.scheme }}'
+          if [ -n "$SCHEME_INPUT" ]; then
+            SCHEME="$SCHEME_INPUT"
+            echo "Using user‑provided scheme: $SCHEME"
+          else
+            SCHEME='${{ steps.detect.outputs.first_scheme }}'
+            echo "Auto‑selected first scheme: $SCHEME"
+          fi
+
+          if [ -z "$SCHEME" ]; then
+            echo "❌ Could not determine a scheme (none listed)." >&2
             exit 1
+          fi
+
+          if [ "${{ steps.detect.outputs.kind }}" = "workspace" ]; then
+            xcodebuild \
+              -workspace "${{ steps.detect.outputs.file }}" \
+              -scheme "$SCHEME" \
+              -sdk "$SDK" -configuration "$CONFIG" \
+              -destination "$DEST" -derivedDataPath "$DERIVED" \
+              CODE_SIGNING_ALLOWED=NO \
+              build | tee $GITHUB_WORKSPACE/xcodebuild.log
+          else
+            xcodebuild \
+              -project "${{ steps.detect.outputs.file }}" \
+              -scheme "$SCHEME" \
+              -sdk "$SDK" -configuration "$CONFIG" \
+              -destination "$DEST" -derivedDataPath "$DERIVED" \
+              CODE_SIGNING_ALLOWED=NO \
+              build | tee $GITHUB_WORKSPACE/xcodebuild.log
           fi
 
       - name: Zip .app for Appetize
@@ -66,9 +111,9 @@ jobs:
           APP_DIR="$GITHUB_WORKSPACE/build/Build/Products/${CONFIG}-iphonesimulator"
           echo "Looking in: $APP_DIR"
           ls -la "$APP_DIR" || true
-          APP_PATH=$(echo "$APP_DIR"/*.app | head -n1)
-          if [ ! -d "$APP_PATH" ]; then
-            echo "❌ No .app found. Check previous step for build errors and scheme name." >&2
+          APP_PATH=$(ls -d "$APP_DIR"/*.app 2>/dev/null | head -n1 || true)
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "❌ No .app found. See build logs above (and xcodebuild.log artifact)." >&2
             exit 1
           fi
           cd "$APP_DIR"
@@ -76,8 +121,10 @@ jobs:
           zip -r "$ZIP_NAME" "$(basename "$APP_PATH")"
           mv "$ZIP_NAME" "$GITHUB_WORKSPACE/"
 
-      - name: Upload artifact
+      - name: Upload artifact (.app.zip and full xcodebuild log)
         uses: actions/upload-artifact@v4
         with:
           name: appetize-simulator-app
-          path: AppetizeBuild.app.zip
+          path: |
+            AppetizeBuild.app.zip
+            xcodebuild.log
