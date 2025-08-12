@@ -26,9 +26,9 @@ struct FoodTruckApp: App {
     /// gives the app an appropriate default size on launch. Similarly, a [`MenuBarExtra`](https://developer.apple.com/documentation/swiftui/menubarextra)
     /// scene is used on macOS to insert a menu into the right side of the menu bar.
     var body: some Scene {
-        WindowGroup {
-            ContentView(model: model, accountStore: accountStore)
-        }
+       WindowGroup {
+    RootView()
+}
         #if os(macOS)
         .defaultSize(width: 1000, height: 650)
         #endif
