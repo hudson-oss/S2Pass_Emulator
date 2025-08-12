@@ -1,0 +1,106 @@
+# File path: .github/workflows/ios-simulator-build.yml
+# Purpose: Build an iOS *Simulator* .app for Appetize using the Xcode **project** (not a nested workspace),
+# and fix whitespace issues in scheme names.
+
+name: iOS Simulator Build (Appetize)
+
+on:
+  workflow_dispatch:
+    inputs:
+      scheme:
+        description: "(Optional) Exact Xcode scheme name (e.g., Food Truck)"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout (full, with LFS & submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+          submodules: recursive
+
+      - name: Show repo tree (debug)
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 3 -name "*.xcodeproj" -print -exec ls -la {} \; || true
+          # NOTE: we intentionally ignore nested "project.xcworkspace" inside .xcodeproj
+
+      - name: List schemes (Food Truck.xcodeproj)
+        id: list
+        run: |
+          set -e
+          if [ ! -d "Food Truck.xcodeproj" ]; then
+            echo "❌ Food Truck.xcodeproj not found at repo root." >&2
+            exit 1
+          fi
+          xcodebuild -list -project "Food Truck.xcodeproj"
+
+      - name: Choose scheme (input or first from list, trimmed)
+        id: choose
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT="${{ github.event.inputs.scheme }}"
+          if [ -n "$INPUT" ]; then
+            S="$INPUT"
+            echo "Using user-provided scheme: '$S'"
+          else
+            LIST=$(xcodebuild -list -project "Food Truck.xcodeproj")
+            S=$(printf "%s\n" "$LIST" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | head -n1)
+            echo "Auto-selected first scheme: '$S'"
+          fi
+          if [ -z "$S" ]; then
+            echo "❌ Could not determine a scheme (none listed)." >&2
+            exit 1
+          fi
+          echo "scheme=$S" >> $GITHUB_OUTPUT
+
+      - name: Resolve Swift Package dependencies (project)
+        run: |
+          set -e
+          xcodebuild -resolvePackageDependencies -project "Food Truck.xcodeproj" -scheme "${{ steps.choose.outputs.scheme }}" || true
+
+      - name: Build (iOS Simulator, signing OFF)
+        env:
+          CONFIG: Release
+          SDK: iphonesimulator
+          DEST: 'platform=iOS Simulator,name=iPhone 15 Pro'
+          DERIVED: ${{ github.workspace }}/build
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "Food Truck.xcodeproj" \
+            -scheme "${{ steps.choose.outputs.scheme }}" \
+            -sdk "$SDK" -configuration "$CONFIG" \
+            -destination "$DEST" -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tee $GITHUB_WORKSPACE/xcodebuild.log
+
+      - name: Zip .app for Appetize
+        run: |
+          set -euo pipefail
+          APP_DIR="$GITHUB_WORKSPACE/build/Build/Products/${CONFIG}-iphonesimulator"
+          echo "Looking in: $APP_DIR"
+          ls -la "$APP_DIR" || true
+          APP_PATH=$(ls -d "$APP_DIR"/*.app 2>/dev/null | head -n1 || true)
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "❌ No .app found. See build logs above (and xcodebuild.log artifact)." >&2
+            exit 1
+          fi
+          cd "$APP_DIR"
+          ZIP_NAME=AppetizeBuild.app.zip
+          zip -r "$ZIP_NAME" "$(basename "$APP_PATH")"
+          mv "$ZIP_NAME" "$GITHUB_WORKSPACE/"
+
+      - name: Upload artifact (.app.zip and full xcodebuild log)
+        uses: actions/upload-artifact@v4
+        with:
+          name: appetize-simulator-app
+          path: |
+            AppetizeBuild.app.zip
+            xcodebuild.log
